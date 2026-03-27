@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>🌸 BookFlow v6 — improved</title>
+
+<style>
+:root{
+    --pink:#ff5fa2;
+    --purple:#7b5cff;
+    --bg1:#ffe6f3;
+    --bg2:#efe6ff;
+    --user-note:#ffe6f3;
+}
+*{box-sizing:border-box;}
+body{
+    margin:0;
+    font-family:'Segoe UI',Arial;
+    display:flex;
+    height:100vh;
+    background:linear-gradient(135deg,var(--bg1),var(--bg2));
+}
+
+/* SIDEBAR */
+#sidebar{
+    width:300px;
+    padding:20px;
+    background:#f3e8ff;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    overflow:auto;
+}
+input,button,textarea{
+    padding:10px;
+    border:none;
+    border-radius:10px;
+}
+textarea{resize:vertical;min-height:60px;}
+button{
+    background:linear-gradient(90deg,var(--pink),var(--purple));
+    color:white;
+    cursor:pointer;
+    transition:opacity .3s;
+}
+button:hover{opacity:0.8;}
+
+/* MAIN */
+#main{flex:1;display:flex;flex-direction:column;}
+
+#chat{
+    flex:1;
+    padding:20px;
+    overflow:auto;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    background:#ffe6f3;
+}
+
+.msg{
+    padding:12px;
+    border-radius:12px;
+    max-width:70%;
+    position:relative;
+    white-space:pre-wrap;
+}
+
+.user{align-self:flex-end;background:#ffd6eb;}
+.bot{align-self:flex-start;background:#f3e8ff;}
+
+.note-remarks{
+    margin-top:8px;
+    padding:8px;
+    background:#ffe0f0;
+    border-radius:8px;
+}
+
+.photo-container img{
+    max-width:150px;
+    margin-top:5px;
+    border-radius:6px;
+    object-fit:cover;
+}
+
+.delete-note,.edit-note{
+    position:absolute;
+    top:5px;
+    cursor:pointer;
+    opacity:0;
+}
+.delete-note{right:5px;}
+.edit-note{right:25px;}
+.msg:hover .delete-note,
+.msg:hover .edit-note{opacity:1;}
+
+#inputArea{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    padding:15px;
+    background:#f3e8ff;
+}
+
+.row{display:flex;gap:8px;}
+
+#photoStatus{
+    font-size:12px;
+    color:#555;
+}
+</style>
+</head>
+
+<body>
+
+<div id="sidebar">
+<h2>🌸 BookFlow</h2>
+
+<input id="newBook" placeholder="Нова книга">
+<button onclick="addBook()">➕ Додати</button>
+
+<div id="bookList"></div>
+</div>
+
+<div id="main">
+<header id="title">📚 Оберіть книгу</header>
+<div id="chat"></div>
+
+<div id="inputArea">
+<input id="text" placeholder="Нотатка...">
+<textarea id="remarks" placeholder="Примітки..."></textarea>
+
+<div class="row">
+<input id="rating" type="number" min="1" max="10" placeholder="⭐">
+<button id="saveBtn" onclick="addNote()">➤</button>
+<button onclick="document.getElementById('photoInput').click()">📸</button>
+</div>
+<div id="photoStatus"></div>
+
+<input id="photoInput" type="file" multiple accept="image/*" hidden onchange="handlePhotoSelect(event)">
+</div>
+</div>
+
+<script>
+let db = JSON.parse(localStorage.getItem("bookflow_v6")) || {books:{}};
+let current=null;
+let selectedPhotos=[];
+let editIndex=null;
+let isLoadingPhotos=false;
+
+/* LINKIFY */
+function linkify(text){
+    if(!text) return "";
+    return text
+    .replace(/(https?:\/\/[^\s]+)/g, url =>
+        `<a href="${url}" target="_blank">${url}</a>`
+    )
+    .replace(/\n/g,"<br>");
+}
+
+/* SAVE */
+function save(){
+localStorage.setItem("bookflow_v6",JSON.stringify(db));
+}
+
+/* BOOKS */
+function addBook(){
+let name=document.getElementById("newBook").value.trim();
+if(!name)return;
+
+if(!db.books[name])db.books[name]=[];
+
+document.getElementById("newBook").value="";
+save();
+renderBooks();
+openBook(name);
+}
+
+function renderBooks(){
+let list=document.getElementById("bookList");
+list.innerHTML="";
+
+Object.keys(db.books).forEach(name=>{
+let div=document.createElement("div");
+div.innerHTML=`
+<button onclick="openBook('${name}')">📖 ${name}</button>
+<button onclick="deleteBook('${name}')">✕</button>
+`;
+list.appendChild(div);
+});
+}
+
+function deleteBook(name){
+if(!confirm("Видалити?"))return;
+delete db.books[name];
+save();
+renderBooks();
+}
+
+function openBook(name){
+current=name;
+document.getElementById("title").innerText="📖 "+name;
+renderChat();
+}
+
+/* CHAT */
+function renderChat(){
+let chat=document.getElementById("chat");
+chat.innerHTML="";
+if(!current)return;
+
+db.books[current].forEach((m,i)=>{
+let div=document.createElement("div");
+div.className="msg "+m.type;
+
+let html=`
+<div>${linkify(m.text)}</div>
+${m.remarks ? `<div class="note-remarks">📝 ${linkify(m.remarks)}</div>` : ""}
+${m.rating ? `<div>⭐ ${m.rating}/10</div>` : ""}
+`;
+
+if(m.photos){
+html+=`<div class="photo-container">
+${m.photos.map(p=>`<img src="${p}">`).join("")}
+</div>`;
+}
+
+div.innerHTML=html+
+`<span class="edit-note" onclick="editNote(${i})">✏️</span>
+<span class="delete-note" onclick="deleteNote(${i})">✕</span>`;
+
+chat.appendChild(div);
+});
+
+chat.scrollTop=chat.scrollHeight;
+}
+
+/* DELETE */
+function deleteNote(i){
+db.books[current].splice(i,1);
+save();
+renderChat();
+}
+
+/* EDIT */
+function editNote(i){
+let note=db.books[current][i];
+document.getElementById("text").value=note.text || "";
+document.getElementById("remarks").value=note.remarks || "";
+document.getElementById("rating").value=note.rating || "";
+editIndex=i;
+document.getElementById("saveBtn").innerText="💾 Зберегти";
+}
+
+/* 🔥 FIXED PHOTO WITH COMPRESSION */
+function handlePhotoSelect(e){
+let files=e.target.files;
+if(!files.length)return;
+
+selectedPhotos=[];
+isLoadingPhotos=true;
+document.getElementById("photoStatus").innerText="⏳ Обробка фото...";
+
+let loaded=0;
+
+Array.from(files).forEach(file=>{
+let reader=new FileReader();
+
+reader.onload=function(event){
+let img=new Image();
+
+img.onload=function(){
+let canvas=document.createElement("canvas");
+let ctx=canvas.getContext("2d");
+
+let maxWidth=800;
+let scale=maxWidth/img.width;
+
+canvas.width=maxWidth;
+canvas.height=img.height*scale;
+
+ctx.drawImage(img,0,0,canvas.width,canvas.height);
+
+let compressed=canvas.toDataURL("image/jpeg",0.6);
+
+selectedPhotos.push(compressed);
+loaded++;
+
+if(loaded===files.length){
+isLoadingPhotos=false;
+document.getElementById("photoStatus").innerText="✅ Фото готові!";
+}
+};
+
+img.src=event.target.result;
+};
+
+reader.readAsDataURL(file);
+});
+
+e.target.value="";
+}
+
+/* ADD NOTE */
+function addNote(){
+if(!current)return alert("Оберіть книгу");
+
+if(isLoadingPhotos){
+return alert("⏳ Фото ще завантажуються...");
+}
+
+let text=document.getElementById("text").value.trim();
+let remarks=document.getElementById("remarks").value.trim();
+let rating=document.getElementById("rating").value;
+
+if(!text && !remarks && !selectedPhotos.length && !rating) return;
+
+let noteData={
+type:"user",
+text,
+remarks,
+rating: rating || null,
+photos:selectedPhotos.length?[...selectedPhotos]:null
+};
+
+if(editIndex!==null){
+db.books[current][editIndex]=noteData;
+editIndex=null;
+document.getElementById("saveBtn").innerText="➤";
+}else{
+db.books[current].push(noteData);
+}
+
+document.getElementById("text").value="";
+document.getElementById("remarks").value="";
+document.getElementById("rating").value="";
+selectedPhotos=[];
+document.getElementById("photoStatus").innerText="";
+
+save();
+renderChat();
+}
+
+renderBooks();
+</script>
+</body>
+</html>
