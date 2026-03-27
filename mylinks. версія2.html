@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🌐 Мої посилання (PRO Notes)</title>
+
+<style>
+body{
+    margin:0;
+    font-family: Arial, sans-serif;
+    background: linear-gradient(135deg,#f7f0ff,#ffe6f2);
+    display:flex;
+    justify-content:center;
+    min-height:100vh;
+}
+
+.container{
+    width:95%;
+    max-width:900px;
+    background:#fff;
+    padding:25px;
+    border-radius:20px;
+    margin:20px 0;
+    box-shadow:0 10px 30px rgba(0,0,0,0.1);
+}
+
+h1{text-align:center;color:#6a3df0;}
+
+.add-box,.search-box{
+    display:flex;
+    gap:10px;
+    margin-bottom:15px;
+}
+
+input{
+    flex:1;
+    padding:10px;
+    border-radius:10px;
+    border:1px solid #ddd;
+}
+
+button{
+    background:#6a3df0;
+    color:white;
+    border:none;
+    padding:8px 10px;
+    border-radius:8px;
+    cursor:pointer;
+    font-size:12px;
+}
+
+.link-card{
+    border:1px solid #eee;
+    border-radius:15px;
+    padding:15px;
+    margin:15px 0;
+    background:#fafaff;
+}
+
+.top-row{display:flex;align-items:center;gap:10px;}
+
+.favicon{width:32px;height:32px;}
+
+a{
+    color:#333;
+    font-weight:bold;
+    text-decoration:none;
+}
+
+.note{
+    background:#f3f3ff;
+    padding:10px;
+    margin-top:8px;
+    border-radius:8px;
+    font-size:13px;
+}
+
+.tags{font-size:11px;color:#6a3df0;margin-top:4px;}
+
+.modal{
+    position:fixed;
+    top:0;left:0;
+    width:100%;height:100%;
+    background:rgba(0,0,0,0.5);
+    display:none;
+    justify-content:center;
+    align-items:center;
+}
+
+.modal-content{
+    background:white;
+    padding:20px;
+    border-radius:12px;
+    width:400px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+<h1>🌐 PRO Нотатки</h1>
+
+<div class="add-box">
+    <input id="newUrl" placeholder="Встав посилання">
+    <button onclick="addSite()">➕</button>
+</div>
+
+<div class="search-box">
+    <input id="search" placeholder="Пошук..." oninput="render()">
+</div>
+
+<div id="list"></div>
+</div>
+
+<!-- MODAL EDITOR -->
+<div class="modal" id="modal">
+    <div class="modal-content">
+        <h3 id="modalTitle">Редагування</h3>
+        <textarea id="noteText" rows="6" placeholder="Текст..."></textarea>
+        <input id="noteTags" placeholder="Теги через кому">
+        <button onclick="saveNote()">💾 Зберегти</button>
+        <button onclick="closeModal()">❌ Закрити</button>
+    </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyAccAxcis95_-So-VZivM7D1ene56Eq-x0",
+  authDomain: "mylinks-1f843.firebaseapp.com",
+  projectId: "mylinks-1f843",
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const col = db.collection("links");
+
+let cache=[];
+
+// ===== MODAL STATE =====
+let mode = null; // note/subnote
+let siteId = null;
+let noteId = null;
+let subId = null;
+
+// ===== LINKIFY =====
+function linkify(text){
+    if(!text) return "";
+    return text.replace(/(https?:\/\/[^\s]+)/g,
+        `<a href="$1" target="_blank">$1</a>`
+    );
+}
+
+// ===== ADD SITE =====
+function addSite(){
+    const url=document.getElementById("newUrl").value.trim();
+    if(!url) return;
+
+    col.doc(btoa(url)).set({
+        url,
+        notes:[],
+        created:Date.now()
+    });
+
+    document.getElementById("newUrl").value="";
+}
+
+// ===== OPEN MODAL =====
+function openModal(type,sId,nId=null,sub=null,data=null){
+    mode=type;
+    siteId=sId;
+    noteId=nId;
+    subId=sub;
+
+    document.getElementById("modal").style.display="flex";
+
+    if(data){
+        document.getElementById("noteText").value=data.text||"";
+        document.getElementById("noteTags").value=(data.tags||[]).join(",");
+    }else{
+        document.getElementById("noteText").value="";
+        document.getElementById("noteTags").value="";
+    }
+}
+
+// ===== CLOSE =====
+function closeModal(){
+    document.getElementById("modal").style.display="none";
+}
+
+// ===== SAVE NOTE / SUBNOTE =====
+function saveNote(){
+    const text=document.getElementById("noteText").value;
+    const tags=document.getElementById("noteTags").value.split(",").map(t=>t.trim());
+
+    col.doc(siteId).get().then(doc=>{
+        const d=doc.data();
+
+        if(mode==="note"){
+            if(noteId){
+                const n=d.notes.find(n=>n.id===noteId);
+                n.text=text;
+                n.tags=tags;
+            }else{
+                d.notes.push({
+                    id:Date.now(),
+                    text,
+                    tags,
+                    subnotes:[]
+                });
+            }
+        }
+
+        if(mode==="sub"){
+            const n=d.notes.find(n=>n.id===noteId);
+            n.subnotes.push({
+                id:Date.now(),
+                text,
+                tags:[]
+            });
+        }
+
+        col.doc(siteId).update({notes:d.notes});
+        closeModal();
+    });
+}
+
+// ===== DELETE SITE =====
+function deleteSite(id){
+    col.doc(id).delete();
+}
+
+// ===== DELETE NOTE =====
+function deleteNote(sid,nid){
+    col.doc(sid).get().then(doc=>{
+        const d=doc.data();
+        d.notes=d.notes.filter(n=>n.id!==nid);
+        col.doc(sid).update({notes:d.notes});
+    });
+}
+
+// ===== DELETE SUB =====
+function deleteSub(sid,nid,sb){
+    col.doc(sid).get().then(doc=>{
+        const d=doc.data();
+        const n=d.notes.find(n=>n.id===nid);
+        n.subnotes=n.subnotes.filter(s=>s.id!==sb);
+        col.doc(sid).update({notes:d.notes});
+    });
+}
+
+// ===== SEARCH =====
+function match(d,q){
+    q=q.toLowerCase();
+    return d.url.toLowerCase().includes(q) ||
+    (d.notes||[]).some(n=>
+        n.text.toLowerCase().includes(q) ||
+        (n.tags||[]).join(" ").toLowerCase().includes(q) ||
+        (n.subnotes||[]).some(s=>s.text.toLowerCase().includes(q))
+    );
+}
+
+// ===== RENDER =====
+function render(){
+    const q=document.getElementById("search").value.toLowerCase();
+    const list=document.getElementById("list");
+    list.innerHTML="";
+
+    cache.forEach(doc=>{
+        const d=doc.data();
+        if(q && !match(d,q)) return;
+
+        const domain=new URL(d.url).hostname;
+        const fav=`https://www.google.com/s2/favicons?sz=64&domain=${domain}`;
+
+        const div=document.createElement("div");
+        div.className="link-card";
+
+        div.innerHTML=`
+            <div class="top-row">
+                <img class="favicon" src="${fav}">
+                <a href="${d.url}" target="_blank">${domain}</a>
+                <button onclick="deleteSite('${doc.id}')">❌</button>
+            </div>
+
+            <button onclick="openModal('note','${doc.id}')">+ нотатка</button>
+
+            ${(d.notes||[]).map(n=>`
+                <div class="note">
+                    <b>${linkify(n.text)}</b>
+                    <div class="tags">#${(n.tags||[]).join(" #")}</div>
+
+                    <button onclick="openModal('note','${doc.id}',${n.id},null,${JSON.stringify(n).replace(/"/g,'&quot;')})">✏️</button>
+                    <button onclick="deleteNote('${doc.id}',${n.id})">🗑</button>
+                    <button onclick="openModal('sub','${doc.id}',${n.id})">+ примітка</button>
+
+                    ${(n.subnotes||[]).map(s=>`
+                        <div style="margin-left:15px">
+                            - ${linkify(s.text)}
+                            <button onclick="deleteSub('${doc.id}',${n.id},${s.id})">🗑</button>
+                        </div>
+                    `).join("")}
+                </div>
+            `).join("")}
+        `;
+
+        list.appendChild(div);
+    });
+}
+
+// ===== FIREBASE =====
+col.onSnapshot(s=>{
+    cache=[];
+    s.forEach(d=>cache.push(d));
+    render();
+});
+</script>
+
+</body>
+</html>
